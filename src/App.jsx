@@ -16,9 +16,10 @@ import { auth, db } from "./lib/firebase";
 const config = {
   cities: "Batman ⇄ Antalya • Uzak Mesafe Aşkı",
   anniversary: "2025-04-12", // 12.04.2025
-  nextMeet: "2025-08-21",    // 21 Ağustos 2025
-  songUrl:
-    "https://files.freemusicarchive.org/storage-freemusicarchive-org/music/no_curator/Komiku/Its_time_for_adventure/Komiku_-_07_-_Battle_of_Pogs.mp3",
+  nextMeet: "2025-08-21", // 21 Ağustos 2025
+  // 🔧 MÜZİK: Yerel dosya. React için en kolayı public/ klasörüne song.mp3 koyup 
+  // buradan "/song.mp3" ile çağırmaktır. (Vite/CRA ikisinde de çalışır.)
+  songUrl: "/song.mp3",
   ensarName: "Ensar",
   zehraName: "Zehra",
 };
@@ -49,7 +50,8 @@ function diffToParts(targetISO) {
 }
 
 function formatCounter({ d, h, m, s }) {
-  return `${d}g ${h}s ${m}d ${s}sn`;
+  // Örn: 10g 05s 12d 07sn (gün/saat/dk/saniye)
+  return `${d}g ${String(h).padStart(2, "0")}s ${String(m).padStart(2, "0")}d ${String(s).padStart(2, "0")}sn`;
 }
 
 export default function App() {
@@ -138,25 +140,25 @@ export default function App() {
 
   // Audio
   function togglePlay() {
-    if (!audioRef.current) return;
-    if (audioRef.current.paused) {
-      audioRef.current.play();
+    const a = audioRef.current;
+    if (!a) return;
+    if (a.paused) {
+      a.play();
       setIsPlaying(true);
     } else {
-      audioRef.current.pause();
+      a.pause();
       setIsPlaying(false);
     }
   }
   function onTime() {
-    if (!audioRef.current) return;
-    setProgress({
-      cur: audioRef.current.currentTime,
-      dur: audioRef.current.duration || 0,
-    });
+    const a = audioRef.current;
+    if (!a) return;
+    setProgress({ cur: a.currentTime, dur: a.duration || 0 });
   }
   function seek(e) {
-    if (!audioRef.current) return;
-    audioRef.current.currentTime = Number(e.target.value);
+    const a = audioRef.current;
+    if (!a) return;
+    a.currentTime = Number(e.target.value);
   }
 
   // Şifreli giriş
@@ -172,10 +174,7 @@ export default function App() {
   }
 
   // Başlık “Zehra 👸” olsun (kalıcı)
-  const headerRight = useMemo(() => {
-    // sabit istek: her zaman Zehra’nın yanında prenses emojisi
-    return `${config.zehraName} 👸`;
-  }, []);
+  const headerRight = useMemo(() => `${config.zehraName} 👸`, []);
 
   // Mobil uyumlu form sınıfları (buton kayma sorunu çözülür)
   const formCls =
@@ -209,9 +208,7 @@ export default function App() {
             >
               Giriş Yap
             </button>
-            <div className="text-xs opacity-60 text-center">
-              (İpucu yok. 😇)
-            </div>
+            <div className="text-xs opacity-60 text-center">(İpucu yok. 😇)</div>
           </form>
         </div>
       </div>
@@ -289,10 +286,7 @@ export default function App() {
           <div className="rounded-2xl bg-white/5 ring-1 ring-white/10 p-4">
             <div className="text-sm opacity-70">Kalbim</div>
             <div className="text-lg mt-2">
-              Hep sende{" "}
-              <span role="img" aria-label="kalp">
-                💖
-              </span>
+              Hep sende <span role="img" aria-label="kalp">💖</span>
             </div>
           </div>
         </div>
@@ -322,14 +316,9 @@ export default function App() {
               <div className="text-sm opacity-60">Henüz not yok.</div>
             )}
             {notes.map((n) => (
-              <div
-                key={n.id}
-                className="rounded-xl bg-white/5 border border-white/10 p-3"
-              >
+              <div key={n.id} className="rounded-xl bg-white/5 border border-white/10 p-3">
                 <div className="text-[13px] opacity-70 flex items-center justify-between">
-                  <span>
-                    {n.author === "Zehra" ? "Zehra 👸" : n.author || "Bilinmiyor"}
-                  </span>
+                  <span>{n.author === "Zehra" ? "Zehra 👸" : n.author || "Bilinmiyor"}</span>
                   {who === n.author && (
                     <button
                       onClick={() => deleteNote(n.id, n.author)}
@@ -352,12 +341,7 @@ export default function App() {
           <div className="w-full max-w-2xl rounded-2xl bg-[#101014] ring-1 ring-white/10 p-6">
             <div className="flex items-center justify-between mb-3">
               <div className="font-semibold text-lg">💌 Aşk Mektubu</div>
-              <button
-                onClick={() => setLetterOpen(false)}
-                className="opacity-70 hover:opacity-100"
-              >
-                Kapat
-              </button>
+              <button onClick={() => setLetterOpen(false)} className="opacity-70 hover:opacity-100">Kapat</button>
             </div>
 
             <textarea
@@ -368,18 +352,8 @@ export default function App() {
               className="w-full rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:ring-2 focus:ring-pink-500 p-3"
             />
             <div className="mt-4 flex items-center justify-end gap-3">
-              <button
-                onClick={() => setLetterOpen(false)}
-                className="rounded-xl px-4 py-2 bg-white/5 ring-1 ring-white/10 hover:bg-white/10"
-              >
-                Vazgeç
-              </button>
-              <button
-                onClick={saveLetter}
-                className="rounded-xl px-4 py-2 bg-pink-500 hover:bg-pink-600"
-              >
-                Kaydet
-              </button>
+              <button onClick={() => setLetterOpen(false)} className="rounded-xl px-4 py-2 bg-white/5 ring-1 ring-white/10 hover:bg-white/10">Vazgeç</button>
+              <button onClick={saveLetter} className="rounded-xl px-4 py-2 bg-pink-500 hover:bg-pink-600">Kaydet</button>
             </div>
           </div>
         </div>
