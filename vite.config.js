@@ -1,4 +1,8 @@
 // vite.config.js
-export default {
-  base: "/romantic-site/",
-};
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+
+export default defineConfig({
+  plugins: [react()],
+  base: "/romantic-site/",   // GitHub Pages için
+});
