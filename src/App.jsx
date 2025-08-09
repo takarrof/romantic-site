@@ -126,7 +126,7 @@ function Login({ onLogin, onSuccessBurst }) {
         />
         <button
           type="submit"
-          className="inline-flex items-center justify-center rounded-2xl px-5 py-2.5 text-sm font-semibold shadow-md bg-gradient-to-r from-pink-500 via-rose-500 to-fuchsia-500 text-white hover:opacity-95 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pink-300"
+          className="inline-flex items-center justify-center rounded-2xl px-5 py-2.5 text-sm font-semibold shadow-md bg-gradient-to-r from-pink-500 via-rose-500 to-fuchsia-500 text-white hover:opacity-95"
         >
           Giriş Yap
         </button>
@@ -266,9 +266,10 @@ function Notes({ currentUser }) {
     <section className="mt-8 w-full max-w-2xl">
       <div className="rounded-3xl border border-white/20 bg-white/70 dark:bg-zinc-900/40 backdrop-blur p-5 shadow">
         <h3 className="font-semibold mb-3">Mini Not Defteri (canlı)</h3>
-        <div className="flex gap-2">
+        {/* \uD83D\uDCF1 Mobil uyum: input + buton yatay grid */}
+        <div className="grid grid-cols-[1fr_auto] gap-2">
           <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Bugün ona ne söylemek istersin?"
-            className="flex-1 rounded-2xl px-4 py-2 bg-white/80 dark:bg-zinc-800/70 border border-pink-200/60 outline-none focus:ring-2 focus:ring-pink-300" />
+            className="w-full rounded-2xl px-4 py-2 bg-white/80 dark:bg-zinc-800/70 border border-pink-200/60 outline-none focus:ring-2 focus:ring-pink-300" />
           <button onClick={add}
             className="inline-flex items-center justify-center rounded-2xl px-5 py-2.5 text-sm font-semibold shadow-md bg-gradient-to-r from-pink-500 via-rose-500 to-fuchsia-500 text-white hover:opacity-95">
             Ekle
