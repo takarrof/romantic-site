@@ -1,7 +1,14 @@
 // src/lib/firebase.js
 import { initializeApp } from "firebase/app";
-import { getFirestore } from "firebase/firestore";
-import { getAuth } from "firebase/auth";
+import {
+  initializeFirestore,  // önemli: getFirestore yerine initializeFirestore
+} from "firebase/firestore";
+import {
+  getAuth,
+  signInAnonymously,
+  setPersistence,
+  browserLocalPersistence,
+} from "firebase/auth";
 
 const firebaseConfig = {
   apiKey: "AIzaSyB9Igg1s9GRMh9iXzuGic-xbQkcGiDxkRY",
@@ -14,5 +21,14 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 
-export const db = getFirestore(app);
+// 🔧 Ağ kısıtlarını aşmak için long-polling
+export const db = initializeFirestore(app, {
+  experimentalAutoDetectLongPolling: true, // mobil veri + kurumsal ağlarda çok işe yarar
+  useFetchStreams: false,                  // bazı cihazlarda daha stabil
+});
+
+// 🔐 Oturumu kalıcı yap + anonim giriş
 export const auth = getAuth(app);
+setPersistence(auth, browserLocalPersistence)
+  .then(() => signInAnonymously(auth))
+  .catch((e) => console.error("Anonim giriş hatası:", e));
