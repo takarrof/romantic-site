@@ -1,500 +1,343 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { db, auth } from "./firebase";
-import {
-  collection, addDoc, deleteDoc, doc,
-  onSnapshot, query, orderBy, serverTimestamp
-} from "firebase/firestore";
+import React, { useEffect, useMemo, useState } from "react";
+import { motion } from "framer-motion";
 
-/* ——— AYARLAR ——— */
-const config = {
-  couple: { you: "Ensar", partner: "Zehra" },
-  cityYou: "Batman",
-  cityPartner: "Antalya",
-  anniversary: "2025-04-12",        // sevgililik: 12 Nisan (GELECEK yıla göre geri sayılacak)
-  nextMeet: "2025-08-21T18:00:00",  // buluşma: 21 Ağustos 18:00
-  ensarBday:  { mmdd: "08-07", label: "Ensar’ın Doğum Günü 🎂" },
-  zehraBday:  { mmdd: "09-23", label: "Zehra’nın Doğum Günü 🎂" },
-  // MP3'ü public/song.mp3 olarak koy
-  songSrc: import.meta.env.BASE_URL + "song.mp3",
+// Firebase
+import { db, auth } from "./lib/firebase"; // sende lib/firebase.js böyleydi
+import {
+  addDoc,
+  collection,
+  onSnapshot,
+  orderBy,
+  query,
+  serverTimestamp,
+  deleteDoc,
+  doc,
+} from "firebase/firestore";
+import { signInAnonymously } from "firebase/auth";
+
+// ———————————— Yardımcılar ————————————
+const fmt2 = (n) => (n < 10 ? `0${n}` : `${n}`);
+const diffInDays = (from, to) =>
+  Math.floor((to.getTime() - from.getTime()) / (1000 * 60 * 60 * 24));
+
+function nextDate(month, day) {
+  const now = new Date();
+  const y = now.getMonth() + 1 > month || (now.getMonth() + 1 === month && now.getDate() > day)
+    ? now.getFullYear() + 1
+    : now.getFullYear();
+  return new Date(`${y}-${fmt2(month)}-${fmt2(day)}T00:00:00`);
+}
+
+function useCountdown(target) {
+  const [tick, setTick] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setTick(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const remain = Math.max(0, target.getTime() - tick);
+  const d = Math.floor(remain / (1000 * 60 * 60 * 24));
+  const h = Math.floor((remain / (1000 * 60 * 60)) % 24);
+  const m = Math.floor((remain / (1000 * 60)) % 60);
+  const s = Math.floor((remain / 1000) % 60);
+  return { d, h, m, s };
+}
+
+// ———————————— Sabitler ————————————
+const REL_START = new Date("2025-04-12T00:00:00");         // sevgili olduğunuz tarih
+const MEET_DATE = nextDate(8, 21);                          // bir sonraki buluşma: 21 Ağustos
+const CITY_LINE = "Batman ⇄ Antalya • Uzak Mesafe Aşkı";
+
+const USERS = {
+  ensar123: { id: "ensar", name: "Ensar", emoji: "❤️", crown: "", color: "from-pink-500 to-rose-500" },
+  zehra123: { id: "zehra", name: "Zehra", emoji: "❤️", crown: "👑", color: "from-fuchsia-500 to-pink-500" },
 };
 
-/* ——— ORTAK ——— */
-function daysBetween(a, b) {
-  return Math.floor((b.getTime() - a.getTime()) / (1000 * 60 * 60 * 24));
-}
-function useCountdown(targetISO) {
-  const [left, setLeft] = useState(0);
+// ———————————— Basit UI parçaları ————————————
+const Card = ({ className = "", children }) => (
+  <div
+    className={
+      "rounded-2xl bg-white/5 backdrop-blur-md border border-white/10 shadow-xl " +
+      "text-white " +
+      className
+    }
+  >
+    {children}
+  </div>
+);
+
+const SectionTitle = ({ icon, children }) => (
+  <div className="flex items-center gap-2 mb-2 text-white/80">
+    <span className="text-lg">{icon}</span>
+    <h3 className="font-semibold">{children}</h3>
+  </div>
+);
+
+// ———————————— Ana Bileşen ————————————
+export default function App() {
+  const [me, setMe] = useState(() => {
+    try {
+      const raw = localStorage.getItem("love.user");
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [pwd, setPwd] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  // firebase anon auth (rules için gerekli)
   useEffect(() => {
-    const t = new Date(targetISO).getTime();
-    const tick = () => setLeft(Math.max(0, t - Date.now()));
-    tick();
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
-  }, [targetISO]);
-  const s = Math.floor(left / 1000);
-  return {
-    days: Math.floor(s / 86400),
-    hours: Math.floor((s % 86400) / 3600),
-    minutes: Math.floor((s % 3600) / 60),
-    seconds: s % 60,
-  };
-}
-function nextOccurrence(mmdd) {
-  const now = new Date();
-  const [m, d] = mmdd.split("-").map(Number);
-  const thisYearDate = new Date(`${now.getFullYear()}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}T00:00:00`);
-  if (thisYearDate.getTime() >= new Date(now.toDateString()).getTime()) {
-    return thisYearDate;
-  }
-  return new Date(`${now.getFullYear()+1}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}T00:00:00`);
-}
+    signInAnonymously(auth).catch(() => {});
+  }, []);
 
-/* ——— KALP YAĞMURU ——— */
-function HeartsRain() {
-  const hearts = Array.from({ length: 18 });
-  return (
-    <div className="pointer-events-none absolute inset-0 overflow-hidden">
-      {hearts.map((_, i) => (
-        <span
-          key={i}
-          className="absolute text-pink-400/70 animate-heart-fall select-none"
-          style={{
-            left: `${(i * 7) % 100}%`,
-            animationDelay: `${(i % 9) * 0.5}s`,
-            fontSize: `${12 + (i % 6) * 6}px`,
-            top: -40,
-          }}
-        >
-          ❤
-        </span>
-      ))}
-    </div>
-  );
-}
-
-/* ——— GECE/GÜNDÜZ YILDIZ ALANI ——— */
-function StarField({ show }) {
-  if (!show) return null;
-  const stars = useMemo(() => Array.from({ length: 70 }), []);
-  return (
-    <div className="pointer-events-none absolute inset-0 overflow-hidden">
-      {stars.map((_, i) => (
-        <span
-          key={i}
-          className="absolute star-twinkle"
-          style={{
-            left: `${Math.random() * 100}%`,
-            top: `${Math.random() * 100}%`,
-            opacity: 0.6 + Math.random() * 0.4,
-            transform: `scale(${0.6 + Math.random() * 0.8})`,
-            animationDelay: `${Math.random() * 3}s`,
-          }}
-        >
-          ✦
-        </span>
-      ))}
-    </div>
-  );
-}
-
-/* ——— GİRİŞ (kalp patlamalı) ——— */
-function Login({ onLogin, onSuccessBurst }) {
-  const [pw, setPw] = useState("");
-  const handle = (e) => {
+  // Login
+  const onLogin = (e) => {
     e.preventDefault();
-    if (pw === "zehra123") { onLogin({ name: "Zehra 👸", role: "zehra" }); onSuccessBurst?.(); }
-    else if (pw === "ensar123") { onLogin({ name: "Ensar", role: "ensar" }); onSuccessBurst?.(); }
-    else alert("Şifre yanlış!");
+    const u = USERS[pwd.trim()];
+    if (!u) return alert("Şifre yanlış :(");
+    localStorage.setItem("love.user", JSON.stringify(u));
+    setMe(u);
+    setPwd("");
   };
-  return (
-    <motion.section
-      initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}
-      className="rounded-3xl backdrop-blur-md bg-white/70 dark:bg-zinc-900/40 shadow-xl p-8 sm:p-10 text-center w-full max-w-md"
-    >
-      <div className="mx-auto inline-flex items-center gap-2 text-sm opacity-80">
-        <span>{config.cityYou} ⇄ {config.cityPartner} • Uzak Mesafe</span>
-      </div>
-      <h1 className="mt-3 text-4xl font-extrabold tracking-tight">Ensar ❤️ Zehra</h1>
-      <form onSubmit={handle} className="mt-6 grid gap-3">
-        <input
-          type="password"
-          value={pw}
-          onChange={(e) => setPw(e.target.value)}
-          placeholder="Şifre"
-          className="rounded-2xl px-4 py-3 bg-white/80 dark:bg-zinc-800/70 border border-pink-200/60 outline-none focus:ring-2 focus:ring-pink-300"
-        />
-        <button
-          type="submit"
-          className="inline-flex items-center justify-center rounded-2xl px-5 py-2.5 text-sm font-semibold shadow-md bg-gradient-to-r from-pink-500 via-rose-500 to-fuchsia-500 text-white hover:opacity-95 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pink-300"
-        >
-          Giriş Yap
-        </button>
-      </form>
-    </motion.section>
-  );
-}
 
-/* ——— GİRİŞ BAŞARISINDA KALP PATLAMASI ——— */
-function HeartBurst() {
-  const [bursts, setBursts] = useState([]);
-  const spawn = () => {
-    const b = Array.from({ length: 22 }).map((_, i) => ({
-      id: `${Date.now()}-${i}`,
-      x: (Math.random() - 0.5) * 240,
-      y: (Math.random() - 0.5) * 240,
-      r: Math.random() * 360,
-      s: 0.8 + Math.random() * 1.2
-    }));
-    setBursts(b);
-    setTimeout(() => setBursts([]), 1200);
+  const onLogout = () => {
+    localStorage.removeItem("love.user");
+    setMe(null);
   };
-  return { view: (
-    <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-      <AnimatePresence>
-        {bursts.map(h => (
-          <motion.span
-            key={h.id}
-            initial={{ opacity: 0, scale: 0.2, x: 0, y: 0, rotate: 0 }}
-            animate={{ opacity: 1, scale: h.s, x: h.x, y: h.y, rotate: h.r }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 1 }}
-            className="text-3xl sm:text-4xl select-none"
-            style={{ color: "rgba(236,72,153,0.9)" }}
-          >
-            ❤
-          </motion.span>
-        ))}
-      </AnimatePresence>
-    </div>
-  ), spawn };
-}
 
-/* ——— MÜZİK ÇALAR ——— */
-function formatTime(s) {
-  if (!isFinite(s)) return "00:00";
-  const m = Math.floor(s / 60);
-  const r = Math.floor(s % 60);
-  return `${String(m).padStart(2, "0")}:${String(r).padStart(2, "0")}`;
-}
-function AudioPlayer({ src, title = "Ortak Şarkımız" }) {
-  const audioRef = useRef(null);
-  const [playing, setPlaying] = useState(false);
-  const [duration, setDuration] = useState(0);
-  const [current, setCurrent] = useState(0);
-  const [volume, setVolume] = useState(0.9);
-  const [loop, setLoop] = useState(false);
+  // Sayaçlar
+  const togetherDays = useMemo(() => diffInDays(REL_START, new Date()), []);
+  const meetLeft = useCountdown(MEET_DATE);
 
-  const toggle = () => {
-    const a = audioRef.current; if (!a) return;
-    if (playing) { a.pause(); setPlaying(false); } else { a.play(); setPlaying(true); }
-  };
-  const stop = () => { const a = audioRef.current; if (!a) return; a.pause(); a.currentTime = 0; setPlaying(false); };
-  const onLoaded = () => { const a = audioRef.current; if (!a) return; setDuration(a.duration || 0); a.volume = volume; a.loop = loop; };
-  const onTime = () => { const a = audioRef.current; if (!a) return; setCurrent(a.currentTime || 0); };
-  const seek = (e) => {
-    const a = audioRef.current; if (!a) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const pct = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
-    a.currentTime = pct * (a.duration || 0);
-    setCurrent(a.currentTime);
-  };
-  const changeVolume = (e) => { const v = Number(e.target.value); setVolume(v); if (audioRef.current) audioRef.current.volume = v; };
-  const toggleLoop = () => { const a = audioRef.current; if (!a) return; a.loop = !loop; setLoop(a.loop); };
-
-  return (
-    <div className="mt-8 w-full max-w-2xl rounded-3xl border border-white/20 bg-white/70 dark:bg-zinc-900/40 backdrop-blur p-5 shadow">
-      <audio ref={audioRef} src={src} onLoadedMetadata={onLoaded} onTimeUpdate={onTime} preload="metadata" />
-      <div className="flex items-center justify-between gap-3">
-        <div className="font-semibold">{title}</div>
-        <div className="text-xs opacity-70">{formatTime(current)} / {formatTime(duration)}</div>
-      </div>
-      <div className="mt-3 h-2 w-full rounded-full bg-black/10 dark:bg-white/10 cursor-pointer" onClick={seek}>
-        <div className="h-2 rounded-full bg-gradient-to-r from-pink-500 via-rose-500 to-fuchsia-500"
-          style={{ width: duration ? `${(current / duration) * 100}%` : "0%" }} />
-      </div>
-      <div className="mt-4 flex flex-wrap items-center gap-3">
-        <button onClick={toggle} className="rounded-2xl px-4 py-2 text-sm font-semibold text-white bg-gradient-to-r from-pink-500 via-rose-500 to-fuchsia-500 shadow hover:opacity-95">
-          {playing ? "Pause" : "Play"}
-        </button>
-        <button onClick={stop} className="rounded-2xl px-4 py-2 text-sm font-semibold border border-white/30 bg-white/70 dark:bg-zinc-800/60">Stop</button>
-        <label className="flex items-center gap-2 text-sm opacity-80 ml-2">Ses
-          <input type="range" min="0" max="1" step="0.01" value={volume} onChange={changeVolume} className="w-28" />
-        </label>
-        <button onClick={toggleLoop}
-          className={`rounded-2xl px-3 py-2 text-sm font-semibold border ${loop ? "border-pink-400 text-pink-600" : "border-white/30"}`} title="Döngü">
-          {loop ? "Loop: Açık" : "Loop: Kapalı"}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/* ——— NOT DEFTERİ (UID kilit) ——— */
-function Notes({ currentUser }) {
-  const COL = "notes";
-  const [text, setText] = useState("");
-  const [items, setItems] = useState([]);
-
+  // ———— Notlar ————
+  const [notes, setNotes] = useState([]);
+  const [draft, setDraft] = useState("");
   useEffect(() => {
-    const q = query(collection(db, COL), orderBy("createdAt", "asc"));
+    const q = query(collection(db, "notes"), orderBy("createdAt", "desc"));
     const unsub = onSnapshot(q, (snap) => {
-      const arr = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      setItems(arr);
+      const arr = [];
+      snap.forEach((d) => arr.push({ id: d.id, ...d.data() }));
+      setNotes(arr);
     });
     return () => unsub();
   }, []);
 
-  const add = async () => {
-    const t = text.trim();
-    if (!t) return;
-    await addDoc(collection(db, COL), {
-      t,
-      author: currentUser.name,   // "Zehra 👸" / "Ensar"
-      role: currentUser.role,     // "zehra" / "ensar"
-      uid: auth.currentUser?.uid || null, // UID kilidi
-      createdAt: serverTimestamp(),
-    });
-    setText("");
+  const addNote = async (e) => {
+    e.preventDefault();
+    const text = draft.trim();
+    if (!text) return;
+    try {
+      setLoading(true);
+      await addDoc(collection(db, "notes"), {
+        text,
+        uid: me?.id ?? "unknown",
+        userName: me?.name ?? "Bilinmiyor",
+        crown: me?.id === "zehra" ? "👑" : "",
+        createdAt: serverTimestamp(),
+      });
+      setDraft("");
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const del = async (id) => { await deleteDoc(doc(db, COL, id)); };
+  const removeNote = async (n) => {
+    if (!me || me.id !== n.uid) return;
+    if (!confirm("Bu not silinsin mi?")) return;
+    await deleteDoc(doc(db, "notes", n.id));
+  };
 
-  const visible = items.filter((n) => !!n.author);
+  // ———— Müzik Çalar ————
+  const [playing, setPlaying] = useState(false);
+  useEffect(() => {
+    const el = document.getElementById("player");
+    if (!el) return;
+    playing ? el.play().catch(() => {}) : el.pause();
+  }, [playing]);
 
+  // ———— Giriş Ekranı ————
+  if (!me) {
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-[#1b1420] to-[#0f0d13] text-white">
+        <div className="max-w-md mx-auto px-6 pt-28">
+          <motion.h1
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="text-center text-3xl font-bold"
+          >
+            Ensar <span className="text-pink-400">❤️</span> Zehra
+          </motion.h1>
+          <p className="text-center mt-2 text-white/65">{CITY_LINE}</p>
+
+          <Card className="mt-8 p-6">
+            <h2 className="text-lg font-semibold mb-3">Merhaba 💫</h2>
+            <p className="text-sm text-white/70 mb-4">
+              Giriş için şifreyi yaz: <b>ensar123</b> veya <b>zehra123</b>
+            </p>
+
+            <form onSubmit={onLogin} className="flex flex-col gap-3">
+              <input
+                type="password"
+                value={pwd}
+                onChange={(e) => setPwd(e.target.value)}
+                placeholder="Şifre…"
+                className="w-full rounded-xl bg-white/10 px-4 py-3 text-white placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-rose-400/60"
+              />
+              <button
+                type="submit"
+                className="w-full rounded-xl bg-gradient-to-r from-pink-500 to-rose-500 py-3 font-semibold shadow-lg shadow-rose-500/25 active:scale-[.98]"
+              >
+                Giriş Yap
+              </button>
+            </form>
+          </Card>
+
+          <p className="text-center mt-6 text-xs text-white/40">
+            Bu site sadece ikimiz için 💞
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // ———— Ana Sayfa ————
   return (
-    <section className="mt-8 w-full max-w-2xl">
-      <div className="rounded-3xl border border-white/20 bg-white/70 dark:bg-zinc-900/40 backdrop-blur p-5 shadow">
-        <h3 className="font-semibold mb-3">Mini Not Defteri (canlı)</h3>
-        <div className="flex gap-2">
-          <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Bugün ona ne söylemek istersin?"
-            className="flex-1 rounded-2xl px-4 py-2 bg-white/80 dark:bg-zinc-800/70 border border-pink-200/60 outline-none focus:ring-2 focus:ring-pink-300" />
-          <button onClick={add}
-            className="inline-flex items-center justify-center rounded-2xl px-5 py-2.5 text-sm font-semibold shadow-md bg-gradient-to-r from-pink-500 via-rose-500 to-fuchsia-500 text-white hover:opacity-95">
-            Ekle
-          </button>
+    <div className="min-h-screen bg-[#0d0b10] bg-[radial-gradient(circle_at_20%_10%,rgba(236,72,153,.15),transparent_40%),radial-gradient(circle_at_80%_30%,rgba(244,63,94,.12),transparent_45%)] text-white">
+      <div className="max-w-3xl mx-auto px-4 sm:px-6 py-10">
+        {/* Başlık */}
+        <div className="text-center">
+          <p className="text-sm text-white/60">{CITY_LINE}</p>
+          <h1 className="text-3xl sm:text-4xl font-extrabold mt-2">
+            {me.name} <span className="text-pink-400">❤️</span> Zehra{" "}
+            {me.id === "zehra" && <span>👑</span>}
+          </h1>
+
+          <p className="mt-3 text-white/75">
+            {diffInDays(REL_START, new Date())} gündür birlikteyiz. Bir sonraki
+            buluşmaya{" "}
+            <b>
+              {meetLeft.d}g {fmt2(meetLeft.h)}s {fmt2(meetLeft.m)}d{" "}
+              {fmt2(meetLeft.s)}sn
+            </b>{" "}
+            kaldı.
+          </p>
+
+          <div className="mt-4 flex items-center justify-center gap-3">
+            <audio id="player" src="/song.mp3" preload="none" />
+            <button
+              onClick={() => setPlaying((p) => !p)}
+              className="rounded-xl bg-white/10 px-4 py-2 text-sm hover:bg-white/15 transition"
+            >
+              {playing ? "⏸ Durdur" : "▶️ Ortak Şarkımızı Çal"}
+            </button>
+
+            <button
+              onClick={onLogout}
+              className="rounded-xl bg-white/10 px-4 py-2 text-sm hover:bg-white/15 transition"
+              title="Çıkış"
+            >
+              Çıkış Yap
+            </button>
+          </div>
         </div>
 
-        <ul className="mt-4 grid gap-2">
-          {visible.map((n) => (
-            <li key={n.id}
-              className={`flex items-start justify-between gap-2 rounded-xl border px-3 py-2 ${
-                n.role === "zehra" ? "bg-pink-50/80 border-pink-200/60" : "bg-blue-50/80 border-blue-200/60"
-              }`}>
-              <div className="pr-2">
-                <div className="text-sm font-semibold">{n.author}</div>
-                <div className="opacity-90">{n.t}</div>
-                <div className="text-[11px] opacity-60 mt-1">
-                  {n.createdAt?.toDate ? new Date(n.createdAt.toDate()).toLocaleString() : "—"}
-                </div>
-              </div>
-              {(n.uid && auth.currentUser?.uid === n.uid) && (
-                <button onClick={() => del(n.id)} className="text-pink-600 hover:underline text-sm" title="Sil (sadece kendi notun)">Sil</button>
-              )}
-            </li>
-          ))}
-          {visible.length === 0 && <li className="text-sm opacity-60">Henüz not yok.</li>}
-        </ul>
-      </div>
-    </section>
-  );
-}
+        {/* Kartlar */}
+        <div className="grid sm:grid-cols-3 gap-4 mt-8">
+          <Card className="p-5">
+            <SectionTitle icon="⏱">Birlikte Geçen Gün</SectionTitle>
+            <div className="text-2xl font-bold">{togetherDays} gün</div>
+          </Card>
 
-/* ——— AŞK MEKTUBU MODAL ——— */
-function LoveLetterModal({ open, onClose, currentUser }) {
-  const [text, setText] = useState("");
-  const save = async () => {
-    const t = text.trim();
-    if (!t) return;
-    await addDoc(collection(db, "letters"), {
-      t,
-      author: currentUser.name,
-      role: currentUser.role,
-      uid: auth.currentUser?.uid || null,
-      createdAt: serverTimestamp(),
-    });
-    setText("");
-    onClose?.();
-  };
-  return (
-    <AnimatePresence>
-      {open && (
-        <motion.div className="fixed inset-0 z-50 grid place-items-center bg-black/40 backdrop-blur-sm"
-          initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-          <motion.div
-            initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
-            className="w-[90%] max-w-2xl rounded-3xl bg-white dark:bg-zinc-900 p-6 shadow-2xl"
+          <Card className="p-5">
+            <SectionTitle icon="📍">Şehirlerimiz</SectionTitle>
+            <div className="text-sm">Batman ⇄ Antalya</div>
+          </Card>
+
+          <Card className="p-5">
+            <SectionTitle icon="💖">Kalbim</SectionTitle>
+            <div className="text-sm">Hep sende {me.id === "zehra" ? "💗" : "💘"}</div>
+          </Card>
+        </div>
+
+        {/* Not Defteri */}
+        <Card className="p-5 mt-6">
+          <SectionTitle icon="📝">Mini Not Defteri (canlı)</SectionTitle>
+
+          {/* Mobilde ALT ALTA, >=sm yan yana  */}
+          <form
+            onSubmit={addNote}
+            className="mt-3 flex flex-col sm:flex-row items-stretch gap-3"
           >
-            <div className="text-xl font-bold mb-3">Aşk Mektubu 💌</div>
-            <textarea
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              placeholder="Bugünlük mektubun..."
-              rows={8}
-              className="w-full rounded-2xl border p-3 bg-white/80 dark:bg-zinc-800/70 outline-none focus:ring-2 focus:ring-pink-300"
+            <input
+              type="text"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder="Bugün ona ne söylemek istersin?"
+              className="w-full rounded-xl bg-white/10 placeholder-white/60 text-white px-4 py-3 text-base focus:bg-white/15 focus:outline-none focus:ring-2 focus:ring-rose-400/50"
             />
-            <div className="mt-4 flex justify-end gap-2">
-              <button onClick={onClose} className="rounded-2xl px-4 py-2 border">Kapat</button>
-              <button onClick={save} className="rounded-2xl px-4 py-2 text-white bg-gradient-to-r from-pink-500 via-rose-500 to-fuchsia-500">Kaydet</button>
-            </div>
-            <div className="mt-2 text-xs opacity-60">Kaydedildiğinde otomatik tarih eklenir.</div>
-          </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>
-  );
-}
 
-/* ——— AŞK MEKTUPLARI LİSTESİ ——— */
-function Letters({ currentUser }) {
-  const [items, setItems] = useState([]);
+            <button
+              type="submit"
+              disabled={loading || !draft.trim()}
+              className="w-full sm:w-auto inline-flex items-center justify-center rounded-xl px-5 py-3 text-sm font-semibold text-white bg-gradient-to-r from-pink-500 to-rose-500 shadow-lg shadow-rose-500/25 active:scale-[.98] transition disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              Ekle
+            </button>
+          </form>
 
-  useEffect(() => {
-    const q = query(collection(db, "letters"), orderBy("createdAt", "desc"));
-    const unsub = onSnapshot(q, (snap) => {
-      setItems(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    });
-    return () => unsub();
-  }, []);
+          {/* notlar */}
+          <div className="mt-4 space-y-3">
+            {notes.length === 0 && (
+              <div className="text-sm text-white/50">Henüz not yok.</div>
+            )}
 
-  const del = async (id) => { await deleteDoc(doc(db, "letters", id)); };
-
-  return (
-    <section className="mt-8 w-full max-w-2xl">
-      <div className="rounded-3xl border border-white/20 bg-white/70 dark:bg-zinc-900/40 backdrop-blur p-5 shadow">
-        <h3 className="font-semibold mb-3">💌 Aşk Mektupları</h3>
-        <ul className="grid gap-3">
-          {items.length === 0 && <li className="text-sm opacity-60">Henüz mektup yok.</li>}
-          {items.map((m) => (
-            <li key={m.id} className="rounded-xl border px-4 py-3 bg-white/80 dark:bg-zinc-800/60">
-              <div className="text-sm font-semibold mb-1">{m.author}</div>
-              <div className="whitespace-pre-wrap">{m.t}</div>
-              <div className="text-[11px] opacity-60 mt-2">
-                {m.createdAt?.toDate ? new Date(m.createdAt.toDate()).toLocaleString() : "—"}
-              </div>
-              {(m.uid && auth.currentUser?.uid === m.uid) && (
-                <div className="mt-2">
-                  <button onClick={() => del(m.id)} className="text-pink-600 hover:underline text-sm">
-                    Sil (sadece kendi mektubun)
-                  </button>
+            {notes.map((n) => (
+              <div
+                key={n.id}
+                className="rounded-xl bg-white/8 border border-white/10 p-4 relative"
+              >
+                <div className="text-xs text-white/50 mb-1">
+                  <b>
+                    {n.userName} {n.crown}
+                  </b>
                 </div>
-              )}
-            </li>
-          ))}
-        </ul>
-      </div>
-    </section>
-  );
-}
+                <div className="whitespace-pre-wrap leading-relaxed">{n.text}</div>
 
-/* ——— ÖZEL GÜN KARTLARI ——— */
-function SpecialCards() {
-  // Yıldönümü: config.anniversary -> AY/GÜN alınır, bir SONRAKİ oluşum geri sayılır
-  const ann = useCountdown(
-    (() => {
-      const dt = new Date(config.anniversary);
-      const mmdd = `${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")}`;
-      return nextOccurrence(mmdd).toISOString();
-    })()
-  );
-  const meet = useCountdown(config.nextMeet);
-  const ensar = useCountdown(nextOccurrence(config.ensarBday.mmdd).toISOString());
-  const zehra = useCountdown(nextOccurrence(config.zehraBday.mmdd).toISOString());
-
-  const Card = ({ title, c }) => (
-    <div className="rounded-2xl border bg-white/70 dark:bg-zinc-800/60 px-4 py-3">
-      <div className="font-semibold">{title}</div>
-      <div className="text-sm opacity-80">
-        {c.days}g {c.hours}s {c.minutes}d {c.seconds}sn
-      </div>
-    </div>
-  );
-  return (
-    <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-2xl">
-      <Card title="Yıldönümüne" c={ann} />
-      <Card title="Buluşmaya" c={meet} />
-      <Card title={config.ensarBday.label} c={ensar} />
-      <Card title={config.zehraBday.label} c={zehra} />
-    </div>
-  );
-}
-
-/* ——— ANA ——— */
-export default function App() {
-  // localStorage YOK → yenileyince tekrar giriş ister
-  const [user, setUser] = useState(null);
-  const togetherDays = daysBetween(new Date(config.anniversary), new Date());
-  const countdown = useCountdown(config.nextMeet);
-  const hour = new Date().getHours();
-  const isNight = hour >= 19 || hour < 6;
-
-  const { view: burstView, spawn: spawnBurst } = HeartBurst();
-  const [letterOpen, setLetterOpen] = useState(false);
-
-  return (
-    <div className={`relative min-h-screen overflow-hidden ${isNight
-      ? "bg-gradient-to-b from-zinc-950 via-zinc-950 to-zinc-900 text-zinc-100"
-      : "bg-gradient-to-b from-pink-50 via-rose-50 to-fuchsia-50 text-zinc-800"}`}>
-      {/* arka plan blobları + efektler */}
-      <div className="pointer-events-none absolute -top-32 -left-32 h-96 w-96 rounded-full bg-gradient-to-br from-pink-400/30 to-fuchsia-400/30 blur-3xl" />
-      <div className="pointer-events-none absolute -bottom-32 -right-32 h-96 w-96 rounded-full bg-gradient-to-br from-rose-400/30 to-amber-400/30 blur-3xl" />
-      <HeartsRain />
-      <StarField show={isNight} />
-      {burstView}
-
-      <main className="relative z-10 mx-auto max-w-5xl px-4 sm:px-6 lg:px-8 py-12 flex flex-col items-center">
-        {!user ? (
-          <Login onLogin={setUser} onSuccessBurst={spawnBurst} />
-        ) : (
-          <motion.section
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.45 }}
-            className="w-full max-w-3xl rounded-3xl backdrop-blur-md bg-white/70 dark:bg-zinc-900/40 shadow-xl p-6 sm:p-10"
-          >
-            <div className="text-center">
-              <div className="text-sm opacity-80">
-                {config.cityYou} ⇄ {config.cityPartner} • Uzak Mesafe Aşkı
+                {/* sadece sahibi silebilir */}
+                {me?.id === n.uid && (
+                  <button
+                    onClick={() => removeNote(n)}
+                    className="absolute right-2 top-2 text-xs text-white/60 hover:text-rose-300"
+                    title="Sil"
+                  >
+                    Sil
+                  </button>
+                )}
               </div>
-              <h2 className="mt-2 text-3xl sm:text-5xl font-extrabold">
-                {config.couple.you} ❤️ {config.couple.partner} 👸
-              </h2>
-              <p className="mt-3 text-lg opacity-90">
-                {togetherDays} gündür birlikteyiz. Bir sonraki buluşmaya{" "}
-                <b>{countdown.days}g {countdown.hours}s {countdown.minutes}d {countdown.seconds}sn</b> kaldı.
-              </p>
+            ))}
+          </div>
+        </Card>
 
-              {/* Müzik Çalar */}
-              {config.songSrc && <AudioPlayer src={config.songSrc} title="Ortak Şarkımız" />}
+        {/* Özel Günler */}
+        <div className="grid sm:grid-cols-3 gap-4 mt-6">
+          <Card className="p-5">
+            <SectionTitle icon="🎂">Ensar’ın Doğum Günü</SectionTitle>
+            <div>07 Ağustos</div>
+          </Card>
+          <Card className="p-5">
+            <SectionTitle icon="🎂">Zehra’nın Doğum Günü</SectionTitle>
+            <div>23 Eylül</div>
+          </Card>
+          <Card className="p-5">
+            <SectionTitle icon="💍">Yıldönümümüz</SectionTitle>
+            <div>12 Nisan</div>
+          </Card>
+        </div>
 
-              {/* Özel Gün Kartları */}
-              <SpecialCards />
-
-              <div className="mt-6 flex flex-wrap justify-center gap-3">
-                <button
-                  onClick={() => setLetterOpen(true)}
-                  className="inline-flex items-center justify-center rounded-2xl px-5 py-2.5 text-sm font-semibold shadow-md bg-white text-zinc-900 border border-zinc-200 hover:bg-zinc-50"
-                >
-                  💌 Aşk Mektubu Yaz
-                </button>
-                <a
-                  href={`https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(config.cityYou)}&destination=${encodeURIComponent(config.cityPartner)}`}
-                  target="_blank" rel="noreferrer"
-                  className="inline-flex items-center justify-center rounded-2xl px-5 py-2.5 text-sm font-semibold shadow-md bg-gradient-to-r from-pink-500 via-rose-500 to-fuchsia-500 text-white hover:opacity-95"
-                >
-                  🗺️ Rota: {config.cityYou} → {config.cityPartner}
-                </a>
-              </div>
-            </div>
-
-            <Notes currentUser={user} />
-            <Letters currentUser={user} />
-          </motion.section>
-        )}
-      </main>
-
-      {/* Mektup Modal */}
-      <LoveLetterModal open={letterOpen} onClose={() => setLetterOpen(false)} currentUser={user || {name:"",role:""}} />
+        <p className="text-center mt-10 text-xs text-white/40">
+          {new Date().getFullYear()} • sadece ikimiz 💞
+        </p>
+      </div>
     </div>
   );
 }
