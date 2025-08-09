@@ -1,117 +1,99 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { motion } from "framer-motion";
-
-// Firebase
-import { db, auth } from "./lib/firebase"; // sende lib/firebase.js böyleydi
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   addDoc,
   collection,
+  deleteDoc,
+  doc,
   onSnapshot,
   orderBy,
   query,
   serverTimestamp,
-  deleteDoc,
-  doc,
 } from "firebase/firestore";
 import { signInAnonymously } from "firebase/auth";
+import { auth, db } from "./lib/firebase";
 
-// ———————————— Yardımcılar ————————————
-const fmt2 = (n) => (n < 10 ? `0${n}` : `${n}`);
-const diffInDays = (from, to) =>
-  Math.floor((to.getTime() - from.getTime()) / (1000 * 60 * 60 * 24));
+// =============  K O N F I G  =============
+const config = {
+  cities: "Batman ⇄ Antalya • Uzak Mesafe Aşkı",
+  anniversary: "2025-04-12", // 12.04.2025
+  nextMeet: "2025-08-21",    // 21 Ağustos 2025
+  songUrl:
+    "https://files.freemusicarchive.org/storage-freemusicarchive-org/music/no_curator/Komiku/Its_time_for_adventure/Komiku_-_07_-_Battle_of_Pogs.mp3",
+  ensarName: "Ensar",
+  zehraName: "Zehra",
+};
 
-function nextDate(month, day) {
-  const now = new Date();
-  const y = now.getMonth() + 1 > month || (now.getMonth() + 1 === month && now.getDate() > day)
-    ? now.getFullYear() + 1
-    : now.getFullYear();
-  return new Date(`${y}-${fmt2(month)}-${fmt2(day)}T00:00:00`);
-}
+// Şifre → isim eşleşmeleri
+const CREDENTIALS = {
+  ensar123: "Ensar",
+  zehra123: "Zehra",
+};
 
-function useCountdown(target) {
-  const [tick, setTick] = useState(Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setTick(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, []);
-  const remain = Math.max(0, target.getTime() - tick);
-  const d = Math.floor(remain / (1000 * 60 * 60 * 24));
-  const h = Math.floor((remain / (1000 * 60 * 60)) % 24);
-  const m = Math.floor((remain / (1000 * 60)) % 60);
-  const s = Math.floor((remain / 1000) % 60);
+// Zaman formatı
+function diffToParts(targetISO) {
+  const target = new Date(targetISO).getTime();
+  const now = Date.now();
+  let diff = Math.max(0, target - now); // negatifse 0’a sabitle
+
+  const d = Math.floor(diff / (1000 * 60 * 60 * 24));
+  diff -= d * (1000 * 60 * 60 * 24);
+
+  const h = Math.floor(diff / (1000 * 60 * 60));
+  diff -= h * (1000 * 60 * 60);
+
+  const m = Math.floor(diff / (1000 * 60));
+  diff -= m * (1000 * 60);
+
+  const s = Math.floor(diff / 1000);
   return { d, h, m, s };
 }
 
-// ———————————— Sabitler ————————————
-const REL_START = new Date("2025-04-12T00:00:00");         // sevgili olduğunuz tarih
-const MEET_DATE = nextDate(8, 21);                          // bir sonraki buluşma: 21 Ağustos
-const CITY_LINE = "Batman ⇄ Antalya • Uzak Mesafe Aşkı";
+function formatCounter({ d, h, m, s }) {
+  return `${d}g ${h}s ${m}d ${s}sn`;
+}
 
-const USERS = {
-  ensar123: { id: "ensar", name: "Ensar", emoji: "❤️", crown: "", color: "from-pink-500 to-rose-500" },
-  zehra123: { id: "zehra", name: "Zehra", emoji: "❤️", crown: "👑", color: "from-fuchsia-500 to-pink-500" },
-};
-
-// ———————————— Basit UI parçaları ————————————
-const Card = ({ className = "", children }) => (
-  <div
-    className={
-      "rounded-2xl bg-white/5 backdrop-blur-md border border-white/10 shadow-xl " +
-      "text-white " +
-      className
-    }
-  >
-    {children}
-  </div>
-);
-
-const SectionTitle = ({ icon, children }) => (
-  <div className="flex items-center gap-2 mb-2 text-white/80">
-    <span className="text-lg">{icon}</span>
-    <h3 className="font-semibold">{children}</h3>
-  </div>
-);
-
-// ———————————— Ana Bileşen ————————————
 export default function App() {
-  const [me, setMe] = useState(() => {
-    try {
-      const raw = localStorage.getItem("love.user");
-      return raw ? JSON.parse(raw) : null;
-    } catch {
-      return null;
-    }
-  });
-  const [pwd, setPwd] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [who, setWho] = useState(null); // "Ensar" | "Zehra"
+  const [pass, setPass] = useState("");
+  const [togetherDays, setTogetherDays] = useState(0);
+  const [meetCounter, setMeetCounter] = useState(
+    formatCounter(diffToParts(config.nextMeet))
+  );
 
-  // firebase anon auth (rules için gerekli)
+  // Notlar
+  const [note, setNote] = useState("");
+  const [notes, setNotes] = useState([]);
+  // Aşk Mektubu
+  const [letterOpen, setLetterOpen] = useState(false);
+  const [letterText, setLetterText] = useState("");
+
+  // Audio player
+  const audioRef = useRef(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [progress, setProgress] = useState({ cur: 0, dur: 0 });
+
+  // Firebase anon login (deploy için şart)
   useEffect(() => {
     signInAnonymously(auth).catch(() => {});
   }, []);
 
-  // Login
-  const onLogin = (e) => {
-    e.preventDefault();
-    const u = USERS[pwd.trim()];
-    if (!u) return alert("Şifre yanlış :(");
-    localStorage.setItem("love.user", JSON.stringify(u));
-    setMe(u);
-    setPwd("");
-  };
+  // Birlikte geçen gün
+  useEffect(() => {
+    const ann = new Date(config.anniversary);
+    const now = new Date();
+    const diff = Math.floor((now - ann) / (1000 * 60 * 60 * 24));
+    setTogetherDays(diff < 0 ? 0 : diff);
+  }, []);
 
-  const onLogout = () => {
-    localStorage.removeItem("love.user");
-    setMe(null);
-  };
+  // Buluşma geri sayım
+  useEffect(() => {
+    const id = setInterval(() => {
+      setMeetCounter(formatCounter(diffToParts(config.nextMeet)));
+    }, 1000);
+    return () => clearInterval(id);
+  }, []);
 
-  // Sayaçlar
-  const togetherDays = useMemo(() => diffInDays(REL_START, new Date()), []);
-  const meetLeft = useCountdown(MEET_DATE);
-
-  // ———— Notlar ————
-  const [notes, setNotes] = useState([]);
-  const [draft, setDraft] = useState("");
+  // Notları canlı dinle
   useEffect(() => {
     const q = query(collection(db, "notes"), orderBy("createdAt", "desc"));
     const unsub = onSnapshot(q, (snap) => {
@@ -122,222 +104,286 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  const addNote = async (e) => {
-    e.preventDefault();
-    const text = draft.trim();
-    if (!text) return;
-    try {
-      setLoading(true);
-      await addDoc(collection(db, "notes"), {
-        text,
-        uid: me?.id ?? "unknown",
-        userName: me?.name ?? "Bilinmiyor",
-        crown: me?.id === "zehra" ? "👑" : "",
-        createdAt: serverTimestamp(),
-      });
-      setDraft("");
-    } finally {
-      setLoading(false);
+  // Not ekle
+  async function addNote(e) {
+    e?.preventDefault?.();
+    const text = note.trim();
+    if (!text || !who) return;
+    await addDoc(collection(db, "notes"), {
+      text,
+      createdAt: serverTimestamp(),
+      author: who,
+    });
+    setNote("");
+  }
+
+  // Not sil (yazan kişi silsin!)
+  async function deleteNote(id, author) {
+    if (who !== author) return;
+    await deleteDoc(doc(db, "notes", id));
+  }
+
+  // Mektup kaydet
+  async function saveLetter() {
+    const t = letterText.trim();
+    if (!t || !who) return;
+    await addDoc(collection(db, "letters"), {
+      text: t,
+      author: who,
+      createdAt: serverTimestamp(),
+    });
+    setLetterText("");
+    setLetterOpen(false);
+  }
+
+  // Audio
+  function togglePlay() {
+    if (!audioRef.current) return;
+    if (audioRef.current.paused) {
+      audioRef.current.play();
+      setIsPlaying(true);
+    } else {
+      audioRef.current.pause();
+      setIsPlaying(false);
     }
-  };
+  }
+  function onTime() {
+    if (!audioRef.current) return;
+    setProgress({
+      cur: audioRef.current.currentTime,
+      dur: audioRef.current.duration || 0,
+    });
+  }
+  function seek(e) {
+    if (!audioRef.current) return;
+    audioRef.current.currentTime = Number(e.target.value);
+  }
 
-  const removeNote = async (n) => {
-    if (!me || me.id !== n.uid) return;
-    if (!confirm("Bu not silinsin mi?")) return;
-    await deleteDoc(doc(db, "notes", n.id));
-  };
+  // Şifreli giriş
+  function handleLogin(e) {
+    e.preventDefault();
+    const name = CREDENTIALS[pass];
+    if (name) {
+      setWho(name);
+      setPass("");
+    } else {
+      setPass("");
+    }
+  }
 
-  // ———— Müzik Çalar ————
-  const [playing, setPlaying] = useState(false);
-  useEffect(() => {
-    const el = document.getElementById("player");
-    if (!el) return;
-    playing ? el.play().catch(() => {}) : el.pause();
-  }, [playing]);
+  // Başlık “Zehra 👸” olsun (kalıcı)
+  const headerRight = useMemo(() => {
+    // sabit istek: her zaman Zehra’nın yanında prenses emojisi
+    return `${config.zehraName} 👸`;
+  }, []);
 
-  // ———— Giriş Ekranı ————
-  if (!me) {
+  // Mobil uyumlu form sınıfları (buton kayma sorunu çözülür)
+  const formCls =
+    "grid grid-cols-[1fr_auto] gap-2 sm:flex sm:items-center sm:gap-3";
+
+  if (!who) {
     return (
-      <div className="min-h-screen bg-gradient-to-b from-[#1b1420] to-[#0f0d13] text-white">
-        <div className="max-w-md mx-auto px-6 pt-28">
-          <motion.h1
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="text-center text-3xl font-bold"
-          >
-            Ensar <span className="text-pink-400">❤️</span> Zehra
-          </motion.h1>
-          <p className="text-center mt-2 text-white/65">{CITY_LINE}</p>
+      <div className="min-h-screen bg-gradient-to-b from-[#1b1b20] to-black text-white flex items-center justify-center p-6">
+        <div className="w-full max-w-md rounded-2xl bg-[#101014]/70 shadow-xl ring-1 ring-white/10 p-6">
+          <div className="text-center space-y-1">
+            <div className="text-sm opacity-70">{config.cities}</div>
+            <h1 className="text-2xl font-bold">
+              {config.ensarName} <span className="text-pink-400">❤</span>{" "}
+              {config.zehraName} 👸
+            </h1>
+          </div>
 
-          <Card className="mt-8 p-6">
-            <h2 className="text-lg font-semibold mb-3">Merhaba 💫</h2>
-            <p className="text-sm text-white/70 mb-4">
-              Giriş için şifreyi yaz: <b>ensar123</b> veya <b>zehra123</b>
-            </p>
-
-            <form onSubmit={onLogin} className="flex flex-col gap-3">
-              <input
-                type="password"
-                value={pwd}
-                onChange={(e) => setPwd(e.target.value)}
-                placeholder="Şifre…"
-                className="w-full rounded-xl bg-white/10 px-4 py-3 text-white placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-rose-400/60"
-              />
-              <button
-                type="submit"
-                className="w-full rounded-xl bg-gradient-to-r from-pink-500 to-rose-500 py-3 font-semibold shadow-lg shadow-rose-500/25 active:scale-[.98]"
-              >
-                Giriş Yap
-              </button>
-            </form>
-          </Card>
-
-          <p className="text-center mt-6 text-xs text-white/40">
-            Bu site sadece ikimiz için 💞
-          </p>
+          <form onSubmit={handleLogin} className="mt-6 space-y-3">
+            <label className="block text-sm opacity-70">Şifre</label>
+            <input
+              className="w-full rounded-xl px-3 py-3 bg-white/5 border border-white/10 focus:outline-none focus:ring-2 focus:ring-pink-500"
+              type="password"
+              value={pass}
+              onChange={(e) => setPass(e.target.value)}
+              autoFocus
+              placeholder="••••••"
+            />
+            <button
+              type="submit"
+              className="w-full rounded-xl bg-pink-500 hover:bg-pink-600 transition px-4 py-3 font-medium"
+            >
+              Giriş Yap
+            </button>
+            <div className="text-xs opacity-60 text-center">
+              (İpucu yok. 😇)
+            </div>
+          </form>
         </div>
       </div>
     );
   }
 
-  // ———— Ana Sayfa ————
   return (
-    <div className="min-h-screen bg-[#0d0b10] bg-[radial-gradient(circle_at_20%_10%,rgba(236,72,153,.15),transparent_40%),radial-gradient(circle_at_80%_30%,rgba(244,63,94,.12),transparent_45%)] text-white">
-      <div className="max-w-3xl mx-auto px-4 sm:px-6 py-10">
+    <div className="min-h-screen text-white bg-[#0b0b0e] relative overflow-x-hidden">
+      {/* Kalpler */}
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(transparent,transparent,rgba(255,0,128,0.06))]"></div>
+
+      <div className="max-w-4xl mx-auto px-4 py-10">
         {/* Başlık */}
-        <div className="text-center">
-          <p className="text-sm text-white/60">{CITY_LINE}</p>
-          <h1 className="text-3xl sm:text-4xl font-extrabold mt-2">
-            {me.name} <span className="text-pink-400">❤️</span> Zehra{" "}
-            {me.id === "zehra" && <span>👑</span>}
+        <div className="text-center space-y-2">
+          <div className="text-sm opacity-70">{config.cities}</div>
+          <h1 className="text-3xl font-extrabold tracking-tight">
+            {config.ensarName} <span className="text-pink-400">❤</span>{" "}
+            {headerRight}
           </h1>
 
-          <p className="mt-3 text-white/75">
-            {diffInDays(REL_START, new Date())} gündür birlikteyiz. Bir sonraki
-            buluşmaya{" "}
-            <b>
-              {meetLeft.d}g {fmt2(meetLeft.h)}s {fmt2(meetLeft.m)}d{" "}
-              {fmt2(meetLeft.s)}sn
-            </b>{" "}
+          <div className="text-sm mt-2 opacity-80">
+            {togetherDays} gündür birlikteyiz. Bir sonraki buluşmaya{" "}
+            <span className="font-semibold text-pink-400">{meetCounter}</span>{" "}
             kaldı.
-          </p>
+          </div>
 
-          <div className="mt-4 flex items-center justify-center gap-3">
-            <audio id="player" src="/song.mp3" preload="none" />
-            <button
-              onClick={() => setPlaying((p) => !p)}
-              className="rounded-xl bg-white/10 px-4 py-2 text-sm hover:bg-white/15 transition"
-            >
-              {playing ? "⏸ Durdur" : "▶️ Ortak Şarkımızı Çal"}
-            </button>
+          <div className="mt-4 flex items-center justify-center gap-3 flex-wrap">
+            {/* Müzik çalar */}
+            <div className="rounded-xl bg-white/5 ring-1 ring-white/10 p-3 flex items-center gap-3">
+              <button
+                onClick={togglePlay}
+                className="rounded-lg bg-pink-500 hover:bg-pink-600 px-3 py-2 text-sm"
+              >
+                {isPlaying ? "Durdur" : "Çal"}
+              </button>
+              <input
+                type="range"
+                min={0}
+                max={progress.dur || 0}
+                value={progress.cur}
+                onChange={seek}
+                className="w-40"
+              />
+              <audio
+                ref={audioRef}
+                src={config.songUrl}
+                onTimeUpdate={onTime}
+                onLoadedMetadata={onTime}
+                onEnded={() => setIsPlaying(false)}
+              />
+            </div>
 
+            {/* Aşk mektubu */}
             <button
-              onClick={onLogout}
-              className="rounded-xl bg-white/10 px-4 py-2 text-sm hover:bg-white/15 transition"
-              title="Çıkış"
+              onClick={() => setLetterOpen(true)}
+              className="rounded-xl bg-white/5 ring-1 ring-white/10 px-4 py-2 hover:bg-white/10"
             >
-              Çıkış Yap
+              💌 Aşk Mektubu
             </button>
           </div>
         </div>
 
-        {/* Kartlar */}
+        {/* Bilgi kutuları */}
         <div className="grid sm:grid-cols-3 gap-4 mt-8">
-          <Card className="p-5">
-            <SectionTitle icon="⏱">Birlikte Geçen Gün</SectionTitle>
-            <div className="text-2xl font-bold">{togetherDays} gün</div>
-          </Card>
+          <div className="rounded-2xl bg-white/5 ring-1 ring-white/10 p-4">
+            <div className="text-sm opacity-70">Birlikte Geçen Gün</div>
+            <div className="text-2xl font-semibold mt-2">{togetherDays} gün</div>
+          </div>
 
-          <Card className="p-5">
-            <SectionTitle icon="📍">Şehirlerimiz</SectionTitle>
-            <div className="text-sm">Batman ⇄ Antalya</div>
-          </Card>
+          <div className="rounded-2xl bg-white/5 ring-1 ring-white/10 p-4">
+            <div className="text-sm opacity-70">Şehirlerimiz</div>
+            <div className="text-lg mt-2">Batman ⇄ Antalya</div>
+          </div>
 
-          <Card className="p-5">
-            <SectionTitle icon="💖">Kalbim</SectionTitle>
-            <div className="text-sm">Hep sende {me.id === "zehra" ? "💗" : "💘"}</div>
-          </Card>
+          <div className="rounded-2xl bg-white/5 ring-1 ring-white/10 p-4">
+            <div className="text-sm opacity-70">Kalbim</div>
+            <div className="text-lg mt-2">
+              Hep sende{" "}
+              <span role="img" aria-label="kalp">
+                💖
+              </span>
+            </div>
+          </div>
         </div>
 
-        {/* Not Defteri */}
-        <Card className="p-5 mt-6">
-          <SectionTitle icon="📝">Mini Not Defteri (canlı)</SectionTitle>
+        {/* Canlı Not Defteri */}
+        <div className="rounded-2xl bg-white/5 ring-1 ring-white/10 p-5 mt-8">
+          <div className="font-semibold mb-3">Mini Not Defteri (canlı)</div>
 
-          {/* Mobilde ALT ALTA, >=sm yan yana  */}
-          <form
-            onSubmit={addNote}
-            className="mt-3 flex flex-col sm:flex-row items-stretch gap-3"
-          >
+          <form onSubmit={addNote} className={formCls}>
             <input
-              type="text"
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
               placeholder="Bugün ona ne söylemek istersin?"
-              className="w-full rounded-xl bg-white/10 placeholder-white/60 text-white px-4 py-3 text-base focus:bg-white/15 focus:outline-none focus:ring-2 focus:ring-rose-400/50"
+              className="rounded-xl px-3 py-3 bg-white/5 border border-white/10 focus:outline-none focus:ring-2 focus:ring-pink-500 w-full"
             />
-
             <button
               type="submit"
-              disabled={loading || !draft.trim()}
-              className="w-full sm:w-auto inline-flex items-center justify-center rounded-xl px-5 py-3 text-sm font-semibold text-white bg-gradient-to-r from-pink-500 to-rose-500 shadow-lg shadow-rose-500/25 active:scale-[.98] transition disabled:opacity-60 disabled:cursor-not-allowed"
+              className="rounded-xl bg-pink-500 hover:bg-pink-600 transition px-4 py-3 font-medium"
             >
               Ekle
             </button>
           </form>
 
-          {/* notlar */}
+          {/* Notlar listesi */}
           <div className="mt-4 space-y-3">
             {notes.length === 0 && (
-              <div className="text-sm text-white/50">Henüz not yok.</div>
+              <div className="text-sm opacity-60">Henüz not yok.</div>
             )}
-
             {notes.map((n) => (
               <div
                 key={n.id}
-                className="rounded-xl bg-white/8 border border-white/10 p-4 relative"
+                className="rounded-xl bg-white/5 border border-white/10 p-3"
               >
-                <div className="text-xs text-white/50 mb-1">
-                  <b>
-                    {n.userName} {n.crown}
-                  </b>
+                <div className="text-[13px] opacity-70 flex items-center justify-between">
+                  <span>
+                    {n.author === "Zehra" ? "Zehra 👸" : n.author || "Bilinmiyor"}
+                  </span>
+                  {who === n.author && (
+                    <button
+                      onClick={() => deleteNote(n.id, n.author)}
+                      className="text-xs text-pink-300 hover:text-pink-400"
+                    >
+                      Sil
+                    </button>
+                  )}
                 </div>
-                <div className="whitespace-pre-wrap leading-relaxed">{n.text}</div>
-
-                {/* sadece sahibi silebilir */}
-                {me?.id === n.uid && (
-                  <button
-                    onClick={() => removeNote(n)}
-                    className="absolute right-2 top-2 text-xs text-white/60 hover:text-rose-300"
-                    title="Sil"
-                  >
-                    Sil
-                  </button>
-                )}
+                <div className="mt-1">{n.text}</div>
               </div>
             ))}
           </div>
-        </Card>
-
-        {/* Özel Günler */}
-        <div className="grid sm:grid-cols-3 gap-4 mt-6">
-          <Card className="p-5">
-            <SectionTitle icon="🎂">Ensar’ın Doğum Günü</SectionTitle>
-            <div>07 Ağustos</div>
-          </Card>
-          <Card className="p-5">
-            <SectionTitle icon="🎂">Zehra’nın Doğum Günü</SectionTitle>
-            <div>23 Eylül</div>
-          </Card>
-          <Card className="p-5">
-            <SectionTitle icon="💍">Yıldönümümüz</SectionTitle>
-            <div>12 Nisan</div>
-          </Card>
         </div>
-
-        <p className="text-center mt-10 text-xs text-white/40">
-          {new Date().getFullYear()} • sadece ikimiz 💞
-        </p>
       </div>
+
+      {/* Aşk Mektubu Modal */}
+      {letterOpen && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center px-4">
+          <div className="w-full max-w-2xl rounded-2xl bg-[#101014] ring-1 ring-white/10 p-6">
+            <div className="flex items-center justify-between mb-3">
+              <div className="font-semibold text-lg">💌 Aşk Mektubu</div>
+              <button
+                onClick={() => setLetterOpen(false)}
+                className="opacity-70 hover:opacity-100"
+              >
+                Kapat
+              </button>
+            </div>
+
+            <textarea
+              value={letterText}
+              onChange={(e) => setLetterText(e.target.value)}
+              rows={8}
+              placeholder="Bugünlük mektubun..."
+              className="w-full rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:ring-2 focus:ring-pink-500 p-3"
+            />
+            <div className="mt-4 flex items-center justify-end gap-3">
+              <button
+                onClick={() => setLetterOpen(false)}
+                className="rounded-xl px-4 py-2 bg-white/5 ring-1 ring-white/10 hover:bg-white/10"
+              >
+                Vazgeç
+              </button>
+              <button
+                onClick={saveLetter}
+                className="rounded-xl px-4 py-2 bg-pink-500 hover:bg-pink-600"
+              >
+                Kaydet
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
