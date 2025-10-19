@@ -84,9 +84,21 @@
       p { font-size: 16px; }
       .quote { font-size: 15px; }
     }
+
+    /* Küçük görünmez alan tıklama sonrası ses başlatmak için */
+    .click-area {
+      position: fixed;
+      inset: 0;
+      z-index: 999;
+      cursor: pointer;
+    }
   </style>
 </head>
 <body>
+  <!-- Müzik otomatik oynatma -->
+  <audio id="bgMusic" src="music.mp3" autoplay loop></audio>
+
+  <!-- Ekran içeriği -->
   <div class="container">
     <h1>Olur da bir gün özlersen<br>ve bu satırları tekrar görürsen...</h1>
     <p>lütfen yaz bana.</p>
@@ -101,5 +113,21 @@
       “başka bir evrende en güzel halinle”
     </div>
   </div>
+
+  <!-- Tarayıcı otomatik oynatmaya izin vermezse, tıklamayla başlat -->
+  <div class="click-area" id="clickArea"></div>
+
+  <script>
+    const audio = document.getElementById("bgMusic");
+    const clickArea = document.getElementById("clickArea");
+
+    // Eğer otomatik oynatma engellenirse, kullanıcı tıklayınca başlat
+    document.addEventListener("click", () => {
+      if (audio.paused) {
+        audio.play().catch(()=>{});
+      }
+      clickArea.style.display = "none";
+    });
+  </script>
 </body>
 </html>
