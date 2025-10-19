@@ -1,15 +1,105 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="tr">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Ensar ❤️ Zehra</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;800&display=swap" rel="stylesheet">
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>...</title>
+
+  <!-- Yazı tipi -->
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;500&display=swap" rel="stylesheet" />
+
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html, body {
+      height: 100%;
+      width: 100%;
+      background: #000;
+      color: #fff;
+      font-family: "Poppins", sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+      overflow: hidden;
+    }
+
+    .container {
+      padding: 25px;
+      max-width: 850px;
+      animation: fadeIn 2s ease-in-out forwards;
+    }
+
+    h1 {
+      font-weight: 300;
+      font-size: clamp(20px, 4vw, 32px);
+      line-height: 1.6;
+      color: rgba(255,255,255,0.9);
+      letter-spacing: 0.5px;
+      opacity: 0;
+      animation: fadeText 2.5s ease-in-out forwards 0.5s;
+    }
+
+    p {
+      margin-top: 20px;
+      font-size: clamp(16px, 3vw, 22px);
+      color: rgba(255,255,255,0.65);
+      opacity: 0;
+      animation: fadeText 2.5s ease-in-out forwards 2.5s;
+    }
+
+    .quote {
+      margin-top: 45px;
+      font-size: clamp(15px, 2.5vw, 20px);
+      color: rgba(255,255,255,0.55);
+      line-height: 1.6;
+      opacity: 0;
+      animation: fadeText 3s ease-in-out forwards 4.5s;
+    }
+
+    .signature {
+      margin-top: 25px;
+      font-size: clamp(14px, 2.2vw, 18px);
+      color: rgba(255,255,255,0.4);
+      font-style: italic;
+      animation: fadeText 3s ease-in-out forwards 6.5s;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: scale(0.98); }
+      to { opacity: 1; transform: scale(1); }
+    }
+
+    @keyframes fadeText {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @media (max-width: 480px) {
+      h1 { font-size: 20px; }
+      p { font-size: 16px; }
+      .quote { font-size: 15px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Olur da bir gün özlersen<br>ve bu satırları tekrar görürsen...</h1>
+    <p>lütfen yaz bana.</p>
+
+    <div class="quote">
+      <q>Bilmeni isterim ki bitti diye üzülmedim,<br>
+      yaşandı diye sevindim.<br>
+      Seni tanımak benim cennetimdi zaten.</q>
+    </div>
+
+    <div class="signature">
+      “başka bir evrende en güzel halinle”
+    </div>
+  </div>
+</body>
 </html>
